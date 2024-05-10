@@ -6,6 +6,12 @@ custom:
   name: moheed
   export-env:
     overwrite: true
+  exportOutputs:
+    include:
+      - E2eTestQueueUrl
+      - CognitoUserPoolServerClientId
+    output:
+      file: ./.env.cfnoutputs
 
 
 provider:
@@ -34,6 +40,19 @@ provider:
         - Effect: Allow
           Action: kms:Decrypt
           Resource: ${ssm:/${self:service}/${param:ssmStage, sls:stage}/kmsArn}
+        - Effect: Allow
+          Action: events:PutEvents
+          Resource: !GetAtt EventBus.Arn
+        - Effect: Allow
+          Action: sns:Publish
+          Resource: !Ref RestaurantNotificationTopic
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:GetItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource: !GetAtt IdempotencyTable.Arn
   environment:
     rest_api_url: !Sub https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${sls:stage}
     serviceName: ${self:service}
@@ -52,9 +71,8 @@ functions:
     environment:
       restaurants_api: !Sub https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${sls:stage}/restaurants
       cognito_user_pool_id: !Ref CognitoUserPool
-      cognito_client_id: !Ref WebCognitoUserPoolClient
-      cognito_server_client_id: !Ref ServerCognitoUserPoolClient
       restaurants_table: !Ref RestaurantsTable
+      orders_api: !Sub https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${sls:stage}/orders
 
   get-restaurants:
     handler: functions/get-restaurants.handler
@@ -79,7 +97,41 @@ functions:
     environment:
       restaurants_table: !Ref RestaurantsTable
 
+  place-order:
+    handler: functions/place-order.handler
+    events:
+      - http:
+          path: /orders
+          method: post
+          authorizer:
+            name: CognitoAuthorizer
+            type: COGNITO_USER_POOLS
+            arn: !GetAtt CognitoUserPool.Arn
+    environment:
+      bus_name: !Ref EventBus
+
+  notify-restaurant:
+    handler: functions/notify-restaurant.handler
+    events:
+      - eventBridge:
+          eventBus: !Ref EventBus
+          pattern:
+            source:
+              - big-mouth
+            detail-type:
+              - order_placed
+    environment:
+      bus_name: !Ref EventBus
+      restaurant_notification_topic: !Ref RestaurantNotificationTopic
+      idempotency_table: !Ref IdempotencyTable
+
 resources:
+  Conditions:
+    IsE2eTest:
+      Fn::Equals:
+        - ${sls:stage}
+        - dev
+
   Resources:
     RestaurantsTable:
       Type: AWS::DynamoDB::Table
@@ -91,6 +143,20 @@ resources:
         KeySchema:
           - AttributeName: name
             KeyType: HASH
+
+    IdempotencyTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        TimeToLiveSpecification:
+          Enabled: true
+          AttributeName: expiration
 
     CognitoUserPool:
       Type: AWS::Cognito::UserPool
@@ -160,6 +226,81 @@ resources:
               - !Ref ApiGatewayRestApi
               - .execute-api.${aws:region}.amazonaws.com/${sls:stage}
 
+    EventBus:
+      Type: AWS::Events::EventBus
+      Properties:
+        Name: order_events_${sls:stage}_${self:custom.name}
+
+    RestaurantNotificationTopic:
+      Type: AWS::SNS::Topic
+
+    E2eTestQueue:
+      Type: AWS::SQS::Queue
+      Condition: IsE2eTest
+      Properties:
+        MessageRetentionPeriod: 60
+        VisibilityTimeout: 1
+
+    E2eTestQueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Condition: IsE2eTest
+      Properties:
+        Queues:
+          - !Ref E2eTestQueue
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal: "*"
+              Action: SQS:SendMessage
+              Resource: !GetAtt E2eTestQueue.Arn
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: !Ref RestaurantNotificationTopic
+            - Effect: Allow
+              Principal: "*"
+              Action: SQS:SendMessage
+              Resource: !GetAtt E2eTestQueue.Arn
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: !GetAtt E2eTestEventBridgeRule.Arn
+
+    E2eTestSnsSubscription:
+      Type: AWS::SNS::Subscription
+      Condition: IsE2eTest
+      Properties:
+        Protocol: sqs
+        Endpoint: !GetAtt E2eTestQueue.Arn
+        RawMessageDelivery: false
+        Region: !Ref AWS::Region
+        TopicArn: !Ref RestaurantNotificationTopic
+
+    E2eTestEventBridgeRule:
+      Type: AWS::Events::Rule
+      Condition: IsE2eTest
+      Properties:
+        EventBusName: !Ref EventBus
+        EventPattern:
+          source: ["big-mouth"]
+        State: ENABLED
+        Targets:
+          - Arn: !GetAtt E2eTestQueue.Arn
+            Id: e2eTestQueue
+            InputTransformer:
+              InputPathsMap:
+                source: "$.source"
+                detailType: "$.detail-type"
+                detail: "$.detail"
+              InputTemplate: !Sub >
+                {
+                  "event": {
+                    "source": <source>,
+                    "detail-type": <detailType>,
+                    "detail": <detail>
+                  },
+                  "eventBusName": "${EventBus}"
+                }
+
   Outputs:
     RestaurantsTableName:
       Value: !Ref RestaurantsTable
@@ -176,6 +317,20 @@ resources:
     CognitoUserPoolServerClientId:
       Value: !Ref ServerCognitoUserPoolClient
 
+    EventBusName:
+      Value: !Ref EventBus
+
+    RestaurantNotificationTopicName:
+      Value: !GetAtt RestaurantNotificationTopic.TopicName
+
+    RestaurantNotificationTopicArn:
+      Value: !Ref RestaurantNotificationTopic
+
+    E2eTestQueueUrl:
+      Condition: IsE2eTest
+      Value: !Ref E2eTestQueue
+
 plugins:
   - serverless-export-env
-#   - serverless-secrets-plugin
+  - serverless-export-outputs
+  # - serverless-plugin-extrinsic-functions
