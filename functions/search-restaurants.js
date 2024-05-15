@@ -1,3 +1,5 @@
+// const { Logger, injectLambdaContext } = require('@aws-lambda-powertools/logger')
+// const logger = new Logger({ serviceName: process.env.serviceName })
 const { DynamoDB } = require("@aws-sdk/client-dynamodb")
 const { DynamoDBDocumentClient, ScanCommand } = require("@aws-sdk/lib-dynamodb")
 const dynamodbClient = new DynamoDB()
@@ -12,7 +14,7 @@ const { serviceName, ssmStage } = process.env
 const tableName = process.env.restaurants_table
 
 const findRestaurantsByTheme = async (theme, count) => {
-  console.log(`finding (up to ${count}) restaurants with the theme ${theme}...`)
+  // logger.debug(`finding (up to ${count}) restaurants with the theme ${theme}...`)
 
   const resp = await dynamodb.send(new ScanCommand({
     TableName: tableName,
@@ -20,11 +22,12 @@ const findRestaurantsByTheme = async (theme, count) => {
     FilterExpression: "contains(themes, :theme)",
     ExpressionAttributeValues: { ":theme": theme }
   }))
-  console.log(`found ${resp.Items.length} restaurants`)
+  // logger.debug(`found ${resp.Items.length} restaurants`)
   return resp.Items
 }
 
 module.exports.handler = middy(async (event, context) => {
+  // logger.refreshSampleRateCalculation()
   const req = JSON.parse(event.body)
   const theme = req.theme
   const restaurants = await findRestaurantsByTheme(theme, context.config.defaultResults)
@@ -42,4 +45,4 @@ module.exports.handler = middy(async (event, context) => {
     config: `/${serviceName}/${ssmStage}/search-restaurants/config`,
     secretString: `/${serviceName}/${ssmStage}/search-restaurants/secretString`
   }
-}))
+})).use(injectLambdaContext(logger))
