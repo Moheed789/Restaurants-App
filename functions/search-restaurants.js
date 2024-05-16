@@ -1,10 +1,11 @@
-// const { Logger, injectLambdaContext } = require('@aws-lambda-powertools/logger')
-// const logger = new Logger({ serviceName: process.env.serviceName })
+const { Tracer, captureLambdaHandler } = require('@aws-lambda-powertools/tracer')
+const tracer = new Tracer({ serviceName: process.env.serviceName })
 const { DynamoDB } = require("@aws-sdk/client-dynamodb")
 const { DynamoDBDocumentClient, ScanCommand } = require("@aws-sdk/lib-dynamodb")
 const dynamodbClient = new DynamoDB()
 const dynamodb = DynamoDBDocumentClient.from(dynamodbClient)
 const middy = require('@middy/core')
+const { injectLambdaContext } = require('@aws-lambda-powertools/logger')
 const ssm = require('@middy/ssm')
 
 const middyCacheEnabled = JSON.parse(process.env.middy_cache_enabled)
@@ -14,7 +15,7 @@ const { serviceName, ssmStage } = process.env
 const tableName = process.env.restaurants_table
 
 const findRestaurantsByTheme = async (theme, count) => {
-  // logger.debug(`finding (up to ${count}) restaurants with the theme ${theme}...`)
+  logger.debug(`finding (up to ${count}) restaurants with the theme ${theme}...`)
 
   const resp = await dynamodb.send(new ScanCommand({
     TableName: tableName,
@@ -22,12 +23,12 @@ const findRestaurantsByTheme = async (theme, count) => {
     FilterExpression: "contains(themes, :theme)",
     ExpressionAttributeValues: { ":theme": theme }
   }))
-  // logger.debug(`found ${resp.Items.length} restaurants`)
+  logger.debug(`found ${resp.Items.length} restaurants`)
   return resp.Items
 }
 
 module.exports.handler = middy(async (event, context) => {
-  // logger.refreshSampleRateCalculation()
+  logger.refreshSampleRateCalculation()
   const req = JSON.parse(event.body)
   const theme = req.theme
   const restaurants = await findRestaurantsByTheme(theme, context.config.defaultResults)
@@ -46,3 +47,4 @@ module.exports.handler = middy(async (event, context) => {
     secretString: `/${serviceName}/${ssmStage}/search-restaurants/secretString`
   }
 })).use(injectLambdaContext(logger))
+.use(captureLambdaHandler(tracer))

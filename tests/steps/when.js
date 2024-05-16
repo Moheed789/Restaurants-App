@@ -53,14 +53,13 @@ const viaHttp = async (relPath, method, opts) => {
       headers.Authorization = authHeader
     }
 
-    const httpReq = http.request({
+    const res = await http.request({
       method, url, headers, data
     })
 
-    const res = await httpReq
     return respondFrom(res)
   } catch (err) {
-    if (err.response.status) {
+    if (err.response && err.response.status) {
       return {
         statusCode: err.response.status,
         headers: err.response.headers

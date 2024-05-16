@@ -1,5 +1,7 @@
-// const { Logger, injectLambdaContext } = require('@aws-lambda-powertools/logger')
-// const logger = new Logger({ serviceName: process.env.serviceName })
+const { Tracer, captureLambdaHandler } = require('@aws-lambda-powertools/tracer')
+const tracer = new Tracer({ serviceName: process.env.serviceName })
+const { Logger, injectLambdaContext } = require('@aws-lambda-powertools/logger')
+const logger = new Logger({ serviceName: process.env.serviceName })
 const middy = require('@middy/core')
 const { EventBridgeClient, PutEventsCommand } = require('@aws-sdk/client-eventbridge')
 const eventBridge = new EventBridgeClient()
@@ -8,11 +10,11 @@ const chance = require('chance').Chance()
 const busName = process.env.bus_name
 
 module.exports.handler = middy(async (event) => {
-  // logger.refreshSampleRateCalculation()
+  logger.refreshSampleRateCalculation()
   const restaurantName = JSON.parse(event.body).restaurantName
 
   const orderId = chance.guid()
-  // logger.debug('placing order...', { orderId, restaurantName })
+  logger.debug('placing order...', { orderId, restaurantName })
 
   const putEvent = new PutEventsCommand({
     Entries: [{
@@ -27,10 +29,10 @@ module.exports.handler = middy(async (event) => {
   })
   await eventBridge.send(putEvent)
 
-  // logger.debug(`published event into EventBridge`, {
-  //   eventType: 'order_placed',
-  //   busName
-  // })
+  logger.debug(`published event into EventBridge`, {
+    eventType: 'order_placed',
+    busName
+  })
 
   const response = {
     statusCode: 200,

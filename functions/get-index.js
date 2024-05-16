@@ -1,5 +1,7 @@
-// const { Logger, injectLambdaContext } = require('@aws-lambda-powertools/logger')
-// const logger = new Logger({ serviceName: process.env.serviceName })
+const { Tracer, captureLambdaHandler } = require('@aws-lambda-powertools/tracer')
+const tracer = new Tracer({ serviceName: process.env.serviceName })
+const { Logger, injectLambdaContext } = require('@aws-lambda-powertools/logger')
+const logger = new Logger({ serviceName: process.env.serviceName })
 const middy = require('@middy/core')
 const fs = require("fs")
 const Mustache = require('mustache')
@@ -18,7 +20,7 @@ const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
 const template = fs.readFileSync('static/index.html', 'utf-8')
 
 const getRestaurants = async () => {
-  // logger.debug('getting restaurants...', { url: restaurantsApiRoot })
+  logger.debug('getting restaurants...', { url: restaurantsApiRoot })
   const url = URL.parse(restaurantsApiRoot)
   const opts = {
     host: url.hostname,
@@ -30,13 +32,16 @@ const getRestaurants = async () => {
   const httpReq = http.get(restaurantsApiRoot, {
     headers: opts.headers
   })
-  return (await httpReq).data
+  const data = (await httpReq).data
+  tracer.addResponseAsMetadata(data, 'GET /restaurants')
+  
+  return data
 }
 
 module.exports.handler = middy(async (event, context) => {
   logger.refreshSampleRateCalculation()
   const restaurants = await getRestaurants()
-  // logger.debug('got restaurants', { count: restaurants.length })  
+  logger.debug('got restaurants', { count: restaurants.length })  
   const dayOfWeek = days[new Date().getDay()]
   const view = {
     awsRegion,
@@ -58,3 +63,4 @@ module.exports.handler = middy(async (event, context) => {
 
   return response
 }).use(injectLambdaContext(logger))
+.use(captureLambdaHandler(tracer))

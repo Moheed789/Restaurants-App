@@ -2,10 +2,13 @@ service: workshop-${self:custom.name}
 
 frameworkVersion: '3'
 
+package:
+  individually: true
+
 custom:
-  # logLevel:
-  #   prod: ERROR
-  #   default: INFO
+  logLevel:
+    prod: ERROR
+    default: INFO
   name: moheed
   export-env:
     overwrite: true
@@ -15,6 +18,12 @@ custom:
       - CognitoUserPoolServerClientId
     output:
       file: ./.env.cfnoutputs
+  serverless-iam-roles-per-function:
+    defaultInherit: true
+  esbuild:
+    minify: true
+    external:
+      - '@aws-sdk'
 
 
 provider:
@@ -56,16 +65,24 @@ provider:
             - dynamodb:UpdateItem
             - dynamodb:DeleteItem
           Resource: !GetAtt IdempotencyTable.Arn
+        - Effect: Allow
+          Action:
+            - "xray:PutTraceSegments"
+            - "xray:PutTelemetryRecords"
+          Resource: "*"
   environment:
     rest_api_url: !Sub https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${sls:stage}
     serviceName: ${self:service}
     stage: ${sls:stage}
     middy_cache_enabled: true
-    middy_cache_expiry_milliseconds: 60000 # 1 mins
+    middy_cache_expiry_milliseconds: 60000
     ssmStage: ${param:ssmStage, sls:stage}
-    # LOG_LEVEL: ${self:custom.logLevel.${sls:stage}, self:custom.logLevel.default}
-    # POWERTOOLS_LOGGER_SAMPLE_RATE: 0.1
-    # POWERTOOLS_LOGGER_LOG_EVENT: true
+    LOG_LEVEL: ${self:custom.logLevel.${sls:stage}, self:custom.logLevel.default}
+    POWERTOOLS_LOGGER_SAMPLE_RATE: 0.1
+    POWERTOOLS_LOGGER_LOG_EVENT: true
+  tracing:
+    apiGateway: true
+    lambda: true
 
 functions:
   get-index:
@@ -439,3 +456,4 @@ plugins:
   - serverless-export-outputs
   - serverless-plugin-extrinsic-functions
   - serverless-iam-roles-per-function
+  - serverless-esbuild
