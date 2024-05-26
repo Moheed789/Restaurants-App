@@ -1,3 +1,5 @@
+const { Logger, injectLambdaContext } = require('@aws-lambda-powertools/logger')
+const logger = new Logger({ serviceName: process.env.serviceName })
 const { Tracer, captureLambdaHandler } = require('@aws-lambda-powertools/tracer')
 const tracer = new Tracer({ serviceName: process.env.serviceName })
 const { DynamoDB } = require("@aws-sdk/client-dynamodb")
@@ -5,7 +7,6 @@ const { DynamoDBDocumentClient, ScanCommand } = require("@aws-sdk/lib-dynamodb")
 const dynamodbClient = new DynamoDB()
 const dynamodb = DynamoDBDocumentClient.from(dynamodbClient)
 const middy = require('@middy/core')
-const { injectLambdaContext } = require('@aws-lambda-powertools/logger')
 const ssm = require('@middy/ssm')
 
 const middyCacheEnabled = JSON.parse(process.env.middy_cache_enabled)

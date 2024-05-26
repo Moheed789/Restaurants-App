@@ -10,11 +10,12 @@ const mockEvbSend = jest.fn()
 EventBridgeClient.prototype.send = mockEvbSend
 
 describe('When we invoke the notify-restaurant function twice with the same order ID', () => {
+    const orderId = chance.guid();
     const event = {
         source: 'big-mouth',
         'detail-type': 'order_placed',
         detail: {
-            orderId: chance.guid(),
+            orderId: orderId,
             restaurantName: 'Fangtasia'
         }
     }

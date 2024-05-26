@@ -5,6 +5,7 @@ frameworkVersion: '3'
 package:
   individually: true
 
+# Custom Variables
 custom:
   logLevel:
     prod: ERROR
@@ -24,8 +25,11 @@ custom:
     minify: true
     external:
       - '@aws-sdk'
+  lumigo:
+    token: t_752d49a874854db9982b3
+    nodePackageManager: npm
 
-
+# Provider
 provider:
   name: aws
   runtime: nodejs18.x
@@ -34,6 +38,7 @@ provider:
   region: us-east-1
   endpointType: regional
 
+  # IAM Role Permissions
   iam:
     role:
       statements:
@@ -70,6 +75,8 @@ provider:
             - "xray:PutTraceSegments"
             - "xray:PutTelemetryRecords"
           Resource: "*"
+
+  # Environment Variables 
   environment:
     rest_api_url: !Sub https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${sls:stage}
     serviceName: ${self:service}
@@ -80,11 +87,17 @@ provider:
     LOG_LEVEL: ${self:custom.logLevel.${sls:stage}, self:custom.logLevel.default}
     POWERTOOLS_LOGGER_SAMPLE_RATE: 0.1
     POWERTOOLS_LOGGER_LOG_EVENT: true
+
+  # Tracing
   tracing:
     apiGateway: true
     lambda: true
 
+# Functions
 functions:
+  
+  # Restaurants Get Index
+  functions:
   get-index:
     handler: functions/get-index.handler
     events:
@@ -92,15 +105,16 @@ functions:
           path: /
           method: get
     environment:
-      restaurants_api: !Sub https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${sls:stage}/restaurants
+      restaurants_api: !Sub https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${self:provider.stage}/restaurants
       cognito_user_pool_id: !Ref CognitoUserPool
       restaurants_table: !Ref RestaurantsTable
-      orders_api: !Sub https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${sls:stage}/orders
+      orders_api: !Sub https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${self:provider.stage}/orders
     iamRoleStatements:
       - Effect: Allow
         Action: execute-api:Invoke
-        Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/${sls:stage}/GET/restaurants
+        Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/${self:provider.stage}/GET/restaurants
 
+  # Get All Restaurants
   get-restaurants:
     handler: functions/get-restaurants.handler
     events:
@@ -119,6 +133,7 @@ functions:
         Resource:
           - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${self:service}/${param:ssmStage, sls:stage}/get-restaurants/config
 
+  # Search Restaurants
   search-restaurants:
     handler: functions/search-restaurants.handler
     events:
@@ -144,6 +159,7 @@ functions:
         Action: kms:Decrypt
         Resource: ${ssm:/${self:service}/${param:ssmStage, sls:stage}/kmsArn}
 
+  # Place Order
   place-order:
     handler: functions/place-order.handler
     events:
@@ -161,6 +177,7 @@ functions:
         Action: events:PutEvents
         Resource: !GetAtt EventBus.Arn
 
+  # Restaurant Notify
   notify-restaurant:
     handler: functions/notify-restaurant.handler
     events:
@@ -197,14 +214,20 @@ functions:
         type: sqs
         arn: !GetAtt OnFailureQueue.Arn
 
+# Resources
 resources:
+
+  # Conditions
   Conditions:
     IsE2eTest:
       Fn::Equals:
         - ${sls:stage}
         - dev
 
+  # Resources
   Resources:
+
+    # Create Restaurant Table
     RestaurantsTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -216,6 +239,7 @@ resources:
           - AttributeName: name
             KeyType: HASH
 
+    # Create Idempotency Table
     IdempotencyTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -230,6 +254,7 @@ resources:
           Enabled: true
           AttributeName: expiration
 
+    # Create Cognito User Pool
     CognitoUserPool:
       Type: AWS::Cognito::UserPool
       Properties:
@@ -266,6 +291,7 @@ resources:
             StringAttributeConstraints:
               MinLength: "1"
 
+    # Create Web Cognito User Pool use Client
     WebCognitoUserPoolClient:
       Type: AWS::Cognito::UserPoolClient
       Properties:
@@ -276,6 +302,7 @@ resources:
           - ALLOW_REFRESH_TOKEN_AUTH
         PreventUserExistenceErrors: ENABLED
 
+    # Create Server Cognito User Pool Client
     ServerCognitoUserPoolClient:
       Type: AWS::Cognito::UserPoolClient
       Properties:
@@ -286,6 +313,7 @@ resources:
           - ALLOW_REFRESH_TOKEN_AUTH
         PreventUserExistenceErrors: ENABLED
 
+    # Create System Manager
     ServiceUrlParameter:
       Type: AWS::SSM::Parameter
       Properties:
@@ -298,14 +326,17 @@ resources:
               - !Ref ApiGatewayRestApi
               - .execute-api.${aws:region}.amazonaws.com/${sls:stage}
 
+    # Create Event Bus
     EventBus:
       Type: AWS::Events::EventBus
       Properties:
         Name: order_events_${sls:stage}_${self:custom.name}
 
+    # Create Simple Notification Service
     RestaurantNotificationTopic:
       Type: AWS::SNS::Topic
 
+    # Create Simple Queue Service
     E2eTestQueue:
       Type: AWS::SQS::Queue
       Condition: IsE2eTest
@@ -313,6 +344,7 @@ resources:
         MessageRetentionPeriod: 60
         VisibilityTimeout: 1
 
+    # Create Simple Queue Service
     E2eTestQueuePolicy:
       Type: AWS::SQS::QueuePolicy
       Condition: IsE2eTest
@@ -337,6 +369,7 @@ resources:
                 ArnEquals:
                   aws:SourceArn: !GetAtt E2eTestEventBridgeRule.Arn
 
+    # Create Simple Notification Service
     E2eTestSnsSubscription:
       Type: AWS::SNS::Subscription
       Condition: IsE2eTest
@@ -347,6 +380,7 @@ resources:
         Region: !Ref AWS::Region
         TopicArn: !Ref RestaurantNotificationTopic
 
+    # Create Event Bridge
     E2eTestEventBridgeRule:
       Type: AWS::Events::Rule
       Condition: IsE2eTest
@@ -373,12 +407,15 @@ resources:
                   "eventBusName": "${EventBus}"
                 }
 
+    # Create Simple Queue Service
     OnFailureQueue:
       Type: AWS::SQS::Queue
 
+    # Create Simple Notification Service
     AlarmTopic:
       Type: AWS::SNS::Topic
 
+    # Create Simple Notification Service
     AlarmTopicSubscription:
       Type: AWS::SNS::Subscription
       Properties:
@@ -386,6 +423,7 @@ resources:
         Protocol: email
         TopicArn: !Ref AlarmTopic
 
+    # Create CloudWatch Alarm on OnFailureQueueAlarm
     OnFailureQueueAlarm:
       Type: AWS::CloudWatch::Alarm
       Properties:
@@ -404,6 +442,7 @@ resources:
         AlarmActions:
           - !Ref AlarmTopic
 
+    # Create CloudWatch Alarm on DestinationDeliveryFailuresAlarm
     DestinationDeliveryFailuresAlarm:
       Type: AWS::CloudWatch::Alarm
       Properties:
@@ -422,38 +461,51 @@ resources:
         AlarmActions:
           - !Ref AlarmTopic
 
+  # Outputs
   Outputs:
+
+    # Restaurants Table Name Output
     RestaurantsTableName:
       Value: !Ref RestaurantsTable
 
+    # Congnito User Pool Id Output
     CognitoUserPoolId:
       Value: !Ref CognitoUserPool
 
+    # Cognito User Pool Arn Output
     CognitoUserPoolArn:
       Value: !GetAtt CognitoUserPool.Arn
 
+    # Cognito User Pool Web Client Id Output
     CognitoUserPoolWebClientId:
       Value: !Ref WebCognitoUserPoolClient
 
+    # Cognito User Pool Server Client Id Output
     CognitoUserPoolServerClientId:
       Value: !Ref ServerCognitoUserPoolClient
 
+    # Event Bus Name Output
     EventBusName:
       Value: !Ref EventBus
 
+    # Restaurant Notification Topic Name Output
     RestaurantNotificationTopicName:
       Value: !GetAtt RestaurantNotificationTopic.TopicName
 
+    # Restaurant Notification Topic Arn Output
     RestaurantNotificationTopicArn:
       Value: !Ref RestaurantNotificationTopic
 
+    # End-to-End Test Queue Url Output
     E2eTestQueueUrl:
       Condition: IsE2eTest
       Value: !Ref E2eTestQueue
 
+# PlugIns
 plugins:
   - serverless-export-env
   - serverless-export-outputs
   - serverless-plugin-extrinsic-functions
   - serverless-iam-roles-per-function
   - serverless-esbuild
+  - serverless-lumigo

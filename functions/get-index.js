@@ -4,6 +4,7 @@ const { Logger, injectLambdaContext } = require('@aws-lambda-powertools/logger')
 const logger = new Logger({ serviceName: process.env.serviceName })
 const middy = require('@middy/core')
 const fs = require("fs")
+const path = require("path")
 const Mustache = require('mustache')
 const http = require('axios')
 const aws4 = require('aws4')
@@ -17,7 +18,13 @@ const awsRegion = process.env.AWS_REGION
 
 const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
-const template = fs.readFileSync('static/index.html', 'utf-8')
+let template
+try {
+  template = fs.readFileSync(path.resolve(__dirname, '..', 'static', 'index.html'), 'utf-8');
+} catch (error) {
+  console.error('Error reading index.html:', error)
+  throw error
+}
 
 const getRestaurants = async () => {
   logger.debug('getting restaurants...', { url: restaurantsApiRoot })
